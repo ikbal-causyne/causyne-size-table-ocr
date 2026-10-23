@@ -4,6 +4,17 @@ authors:
   - family-names: "Fadilah"
     given-names: "Ikbal"
     orcid: "https://orcid.org/0009-0008-4853-135X"
-title: "Size Table Reconstruction from Spatial OCR Tokens"
+title: "causyne-size-table-ocr"
 license: MIT
 type: software
+url: "https://github.com/ikbal-causyne/causyne-size-table-ocr"
+preferred-citation:
+  type: unpublished
+  authors:
+    - family-names: "Fadilah"
+      given-names: "Ikbal"
+      orcid: "https://orcid.org/0009-0008-4853-135X"
+  title: "From OCR Tokens to Apparel Size Tables: An Android Implementation and Failure Analysis"
+  year: 2026
+  url: "https://github.com/ikbal-causyne/causyne-size-table-ocr/blob/main/paper/paper1_review.pdf"
+  notes: "Public working preprint; not peer reviewed."

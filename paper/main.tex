@@ -1,0 +1,332 @@
+\documentclass[10pt,letterpaper]{article}
+
+\usepackage[letterpaper,margin=0.92in]{geometry}
+
+\usepackage[T1]{fontenc}
+
+\usepackage{mathptmx}
+
+\usepackage{microtype}
+
+\usepackage{amsmath}
+
+\usepackage{booktabs}
+
+\usepackage{array}
+
+\usepackage{float}
+
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\parindent}{1.1em}
+
+\setlength{\parskip}{0pt}
+
+\emergencystretch=1.5em
+
+\raggedbottom
+
+\begin{document}
+
+\begin{center}
+
+\rule{\textwidth}{0.8pt}\par\vspace{0.6em}
+
+{\LARGE\bfseries From OCR Tokens to Apparel Size Tables: An Android Implementation and Failure Analysis\par}
+
+\vspace{0.6em}\rule{\textwidth}{0.4pt}\par\vspace{1.2em}
+
+{\normalsize\bfseries Ikbal Fadilah\par}
+
+Causyne\par
+
+\texttt{ikbal@causyne.com}\par
+\href{https://orcid.org/0009-0008-4853-135X}{ORCID: 0009-0008-4853-135X}\par
+
+\end{center}
+
+\vspace{1.0em}
+
+\begin{center}
+
+\begin{minipage}{0.82\textwidth}
+
+\begin{center}\bfseries Abstract\end{center}
+
+An OCR transcript of a clothing size chart can contain every visible number and still attach a measurement to the wrong size. I examine an Android path that keeps ML Kit's token boxes and groups them into candidate rows and columns. Source inspection reveals several details that affect interpretation: element confidence is assigned a constant, character substitutions apply to whole tokens, and a solitary measurement is expanded to an inferred interval. A separate Kotlin package starts with spatial tokens and does not recognize images. I describe the two boundaries, give a worked failure case, and define a benchmark that would measure cell association and abstention alongside OCR quality. No annotated image corpus, timing series, or network trace accompanies this report. It documents the implemented method and its failure modes; it does not present a measured accuracy result or a validated fit predictor.
+
+\par\vspace{0.45em}\noindent\textbf{Keywords:}  on-device OCR, size charts, table reconstruction, Android, document analysis, evaluation protocol\par
+
+\end{minipage}
+
+\end{center}
+
+\vspace{0.8em}
+
+\section{Introduction}
+
+Consider a compact chart with a header reading `\texttt{Size, Chest, Waist'' and a row reading }`M, 96--100, 74--78.'' If OCR returns those six pieces in reading order but discards their positions, the parser still has to decide which range belongs to which dimension. The difficulty increases when a screenshot crops the header or a photograph tilts the row. The size label and two ranges can all be transcribed correctly while the final table is wrong.
+
+The Android code examined here retains each recognized element's rectangle. It estimates rows and columns from the centers of those rectangles, classifies labels with regular expressions and keyword lists, and parses numeric ranges. This makes the association step inspectable. It also exposes assumptions: tokens near one another are taken to share a row, the first row or column is expected to carry labels, and numeric-looking text receives special handling. The paper follows the data through those assumptions instead of treating the recognizer as a complete table reader.
+
+The local scanner route uses a bundled recognizer. The larger application has other networked features, including an optional assisted parsing path, so ``on-device'' here names a specific invocation, not the whole product. A later study could test that route with airplane mode and a process-level network trace. No such trace is presented below. The contribution of this paper is a source-level account of how the local path constructs a table, a concrete analysis of where it can fail, and a protocol for measuring those failures on permission-cleared charts.
+
+\section{Problem definition}
+
+The input is a raster image containing a table or a table-like arrangement of size labels and garment dimensions. The recognizer returns tokens with text and bounding rectangles. The target output is a set of records indexed by size. Each record may contain measurements such as chest, waist, or length, together with units and an indication of ambiguity. A useful system must preserve the association between each value and its row and column, not merely extract numbers.
+
+The task has several sources of uncertainty. A label such as `\texttt{M'' can be a size, a unit fragment, or noise. A value such as }`90-96'' can be an interval, two adjacent cells joined by poor OCR, or a hyphenated identifier. One chart may measure garment circumference while another reports body circumference. A half-chest value can look plausible if interpreted as a full circumference but lead to a wrong fit conclusion. Inference about the convention requires evidence in the chart, not confidence in a language model's narrative.
+
+This report separates text recognition, structural reconstruction, semantic interpretation, and purchase-related fit advice. A correct table reconstruction does not automatically validate a fit recommendation. The objective of the current study is to describe and evaluate extraction. Any later user-facing size suggestion needs separate anthropometric data, product-specific conventions, and an analysis of uncertainty. A parser should be allowed to abstain when the image does not support a reliable association.
+
+\subsection{Related work and design position}
+
+Document layout analysis has developed large annotated resources and learned models. PubLayNet \cite{r2} was assembled from scientific articles with layout labels, and PubTables-1M \cite{r3} supplies detailed table structure annotations for tables in scientific documents. These projects show why geometry and annotation quality matter. Their domains are not the same as retail size-chart screenshots or photographs. A model that performs well on article pages cannot be assumed to handle garment labels, flat measurements, or screenshots compressed by a marketplace. The current report therefore treats those resources as methodological context, not as evidence of performance on this task.
+
+The Android path here combines an existing on-device OCR recognizer with deterministic reconstruction rules. This design has practical attractions: individual transformations can be inspected, and it avoids training a new model to group rows in a limited domain. It also creates a different kind of brittleness. A fixed threshold for row spacing may fail when a photograph is tilted. A lexical rule may miss a brand-specific measurement label. A numeric correction rule may improve some values while damaging text that only looks numeric. These tradeoffs should be measured directly rather than presented as proof that heuristics are superior to learned methods.
+
+The proposed study should compare at least a plain OCR transcript parser and a coordinate-aware parser on the same held-out images. If a learned table model is added as a baseline, its input requirements, runtime, training data, and licensing should be documented. A large model running on a server answers a different deployment question from a bundled mobile recognizer, so accuracy and resource cost should be reported separately. A comparison with a cloud service also changes the privacy boundary and may require permission to transmit images. No such experiment has been executed for this draft.
+
+The closest conceptual distinction is between \emph{recognition} and \emph{reconstruction}. ML Kit recognizes text and gives coordinates, but it does not know that a particular number is a waist measurement for size M. The reconstruction stage tries to express that relationship. This stage is where table-specific errors arise and where a new benchmark would add the most value. By publishing the annotation schema, failure categories, and evaluation script alongside results, a later paper could test whether the simple rules remain competitive on new chart styles. At present that is a research question, not a conclusion.
+
+\section{Two implementation boundaries}
+
+The Android application uses the bundled ML Kit Latin-script text-recognition dependency \cite{r1}. Its scanner acquires an image through the Android photo picker \cite{r4}, invokes local OCR, collects the recognizer's blocks, lines, and elements, and passes their geometry to \texttt{OcrSizeIntelligenceEngine}. This is the only route in the current inventory that starts with image pixels and reaches the reconstruction code on a device. It should be tested as an end-to-end path, with model availability and image preprocessing included in timing.
+
+A separate, staged Kotlin package begins at a later boundary. It accepts tokens that already have text and coordinates. That package can be useful for testing reconstruction logic independently of the OCR engine, but it does not itself recognize a photograph. Calling it a complete on-device scanner would omit the recognizer and its packaging requirements. Comparisons between the package and the Android application must account for the different inputs and failure modes.
+
+
+\begin{table}[H]
+\centering\small
+\caption{Source-level findings in the Android scanner. These are code observations, not benchmark results.}
+\label{tab:ocr-audit}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.18\linewidth}>{\raggedright\arraybackslash}p{0.37\linewidth}>{\raggedright\arraybackslash}p{0.36\linewidth}@{}}
+\toprule
+Step & Implemented behavior & Consequence for interpretation \\
+\midrule
+Recognition & ML Kit elements retain boxes; each receives $q=0.8$ in the wrapper. & The value is a default, not a calibrated OCR probability. \\
+Normalization & Replacements map letters such as O, I, S, and B to digits across whole tokens. & A header or size label can be changed before classification. \\
+Grouping & Centers are clustered with half the mean gap above 10 pixels. & An empty qualifying-gap set has no robust estimate. \\
+Measurement & A solitary numeric value becomes $[v-2,v+2]$; the default unit is cm. & This interval and unit are inferred, not printed. \\
+Context & Region and gender parameters are unused in the inspected method. & No region- or gender-conditioned claim follows. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+The application also contains an optional service-assisted path when a service object and account parameters are supplied. The local scan route described here does not use that path. A reproducible paper should identify the exact method invocation and build revision for each experiment. Otherwise a result could be attributed to the local parser while actually depending on a cloud service. The present draft describes code boundaries; it contains no captured experiment proving that every related route remains local.
+
+\subsection{OCR tokens and geometry}
+
+The recognizer's output is more informative than a concatenated transcript because each element has a bounding rectangle. A token record can be written as \texttt{(text, left, top, right, bottom)}. A center point and height are derived from those bounds. These coordinates allow the reconstruction stage to ask whether two tokens occupy the same visual row or align as a column. The image coordinate system must be fixed before evaluation, especially if an input has been rotated, resized, or cropped.
+
+The implementation traverses text blocks, lines, and elements. Its element-level confidence field is assigned a default rather than read as a measured recognition probability. That detail matters: a downstream quality score that consumes the default cannot be described as calibrated confidence. A useful experiment should retain the raw OCR output so failures can be separated into recognition failures and association failures. If a character was never recognized, the table parser cannot recover it by spatial grouping alone.
+
+Geometry can fail when table cells are merged, text is curved or rotated, columns are not aligned, or decorative labels share a row with measurements. Photographs add perspective distortion and uneven illumination. A future geometric model may address these cases, but they should first be recorded as failure categories. The current source should not be credited with kernel-density estimation, graph matching, or other algorithms that are absent from the implementation.
+
+\subsection{Token normalization}
+
+The Android normalizer applies five letter-to-digit substitutions to every token before role classification. A direct trace of the rules changes \texttt{SIZE} to \texttt{51ZE}, \texttt{CHEST} to \texttt{CHE5T}, and \texttt{XL} to \texttt{X1}. The first two can no longer match the original header keywords; the third no longer matches the alphabetic size pattern. These are deductions from the source rules, not frequencies measured on images. Numeric spans can benefit from correcting O to 0 or I to 1, but the same rule applied to a header can erase the evidence needed to attach measurements to a dimension.
+
+The staged reconstruction package uses a narrower numeric-span approach. That difference should be kept visible in tests and documentation. An ablation can compare raw tokens, broad replacement, and numeric-context replacement on the same held-out images. The expected result is not known before measurement. Error analysis should count both repairs that make a value correct and new errors introduced by the normalizer. A design that increases recall while corrupting headers may reduce overall table accuracy.
+
+Normalization must also address punctuation and units without inventing information. A decimal comma, a multiplication sign, and a range dash may be significant. `\texttt{cm'' and }`in'' should only be inferred when explicit labels or strong chart context support them. When the unit is missing, the output should preserve that uncertainty. The evaluation manifest should record the expected normalized token, the original OCR token, and any transformation applied, making each correction auditable.
+
+\subsection{Row and column reconstruction}
+
+The Android engine groups tokens using their bounding-box centers and spacing thresholds. This is a practical heuristic for charts with approximately aligned rows and columns. It avoids assuming that every table has drawn borders. It also has a predictable weakness: if a header spans multiple columns or cells have very different widths, center distances alone may not identify the intended grid. The implementation's threshold depends on observed gaps, so empty or degenerate gap sets need explicit handling.
+
+Structural evaluation should compare predicted cells with annotated cells rather than only compare final strings. One metric can ask whether a token was assigned to the correct row and column. Another can ask whether the values under a measurement heading were linked to the correct size label. These metrics identify different failures. A parser may read every word correctly but swap two columns, which would be dangerous if only OCR character accuracy were reported.
+
+An evaluation corpus should include borderless tables, colored headers, uneven cell spacing, multi-line labels, and more than one table in the same image. Rotation and perspective should be recorded as image attributes. If the current heuristic cannot handle such cases, the paper should report the boundary and the abstention behavior. A simple geometric method can be valuable when it is cheap and transparent, but its usefulness must be judged against observed errors and alternative baselines.
+
+\subsection{Semantic roles and measurements}
+
+After spatial grouping, a cell still needs a role. Candidate roles include size label, dimension heading, numeric measurement, unit label, and unrelated text. The implementation uses lexical patterns and chart context to assign these roles. A role classifier should be evaluated separately from geometry so that a row error is not mistaken for a dictionary error. In a practical annotation, a token can also be marked ambiguous rather than forced into one role.
+
+Measurement parsing must distinguish a point value, a range, a pair of values from adjacent cells, and a non-measurement number such as a product code. The current parser uses simple numeric rules and may expand a single value to a small interval as a heuristic. Such an interval must be labeled as inferred, not as a printed chart value. A manuscript cannot present it as ground truth. Unit conversion should preserve the original value and unit alongside any normalized representation, with rounding rules stated in advance.
+
+The chart may mix conventions. A chest label can denote body circumference, garment circumference, or a flat measurement that needs doubling. The implementation does not have enough evidence to resolve every convention automatically. The output schema should include an unknown convention state and a warning when the chart is ambiguous. Users should not receive a confident purchase recommendation solely because a number lies in a plausible range.
+
+\subsection{Consistency and abstention}
+
+The pipeline checks whether a candidate table contains a plausible number of sizes and whether associations are internally consistent. Such checks can catch missing columns or duplicated values, but they are not a substitute for correctness against the original image. An incorrect table can be internally consistent. Conversely, a genuine chart may have unconventional ordering. A consistency filter should therefore produce reasons and retain the underlying extracted cells for inspection.
+
+The source's region and gender context parameters do not presently perform substantive conditioning in the reviewed method. It would be inaccurate to describe the current implementation as region-aware or gender-aware on that basis. If those features are later implemented, tests should isolate their effect and avoid encoding stereotypes as unexplained defaults. A chart's printed measurements are stronger evidence than a presumed regional size convention.
+
+An abstention option is important when input quality is poor. The system can refuse to associate a value if the row, column, unit, or size label is uncertain. Evaluation should then report coverage and error jointly. A parser that answers on every image may have a higher raw output rate while exposing users to more wrong associations. A parser that abstains on difficult charts may be more useful if it clearly explains what information is missing. The threshold for abstention should be selected on a development set and held fixed for evaluation.
+
+\subsection{Geometry as implemented}
+
+The geometry code does not infer borders. It gathers the center coordinates of every OCR token, sorts them, and computes adjacent gaps. Only gaps exceeding ten image pixels enter the threshold calculation; the mean of those gaps is halved. Token assignment then searches the list of distinct centers for the first center within that threshold. This is more specific than saying the method ``clusters rows.'' It matters because the threshold depends on image scale. A ten-pixel gap after aggressive downsampling has a different meaning from ten pixels in a full-resolution photograph.
+
+The calculation also has a degenerate case. If there are two or more tokens but none of the adjacent gaps exceeds ten pixels, the filtered list is empty. The code takes its average and converts it to a floating-point threshold. There is no explicit branch that substitutes a finite threshold for this case. Tests should include tightly spaced text and tokens sharing centers to determine the result on the target runtime. The manuscript does not present that behavior as measured, but the missing guard is visible in the source.
+
+The first-matching-center rule may also make row indices dependent on small variations in the OCR boxes. A token near two center values is assigned to whichever qualifying center is encountered first, rather than to the nearest cluster prototype. Because the list of centers is drawn from all tokens, one OCR outlier can add another candidate center. These details offer a direct explanation for why a clear-looking chart might still produce a fragmented table. A future implementation could compare the current rule with robust median spacing or an overlap-based grouping method. The present report evaluates the rule that is actually implemented.
+
+\subsection{Association paths and fallback behavior}
+
+Measurement extraction is performed twice in related forms. An early pass groups cells by row and stores parsed measurements under a key composed of the size label and column index. A later context pass tries to map each measurement column to a dimension header. If a matching header is absent, it calls a positional rule: column one is chest, column two waist, column three hip, and column four length. A further fallback labels the first unclassified numeric cell in a row as chest and the second as waist. These are useful recovery heuristics for conventional charts, but they can produce a plausible wrong label when a retailer puts waist before chest.
+
+This distinction affects how a result should be reported. A value read under an explicit `\texttt{Waist'' heading has different provenance from one labeled }`waist'' only because it was the second numeric cell. The current output type does not make that provenance obvious in the final size entry. An evaluation should annotate both the final field and the path that supplied it. Without that path, an apparently correct measurement can conceal a fragile dependency on column order.
+
+The code parses a printed range such as \texttt{96-100} directly into lower and upper values. It treats a single value with a unit, or a plain number in a broad allowed interval, differently: it creates an interval two units below and above the printed value. That expansion is not a confidence interval learned from garment data. It is a fixed convenience heuristic. For a plain number, the code also assumes centimeters. Both the inferred interval and the inferred unit need explicit labels in any public output or ground-truth comparison.
+
+\subsection{Confidence and warning semantics}
+
+The final confidence is a product of four factors: OCR, structure, semantics, and regional consistency. The OCR factor begins with the same default value assigned to every recognized element. Structural confidence is selected from a few discrete values based on row and column counts and the presence of size labels and measurements. Semantic confidence depends on the ratio of size labels to all cells. Regional consistency currently returns a constant value of 0.8. Multiplication makes the final number sensitive to these choices, but it does not calibrate the number against the probability that an extracted cell is correct.
+
+The source also contains a penalty when any factor falls below 0.5. This creates a sharp change in the score near that boundary. A chart with one factor just below the threshold can receive roughly half the score of a similar chart just above it. Such a discontinuity may be a reasonable operational rule, but its effect needs to be studied using labeled charts before the score is presented as user-facing certainty. A calibration plot would compare score bins with observed cell correctness; the plot cannot be drawn from the current evidence.
+
+Finally, the inspected \texttt{generateWarnings} method initializes a list and returns its distinct elements without adding any warning. Internal processing stages may record issues, but the final warning list is empty through this method. The earlier suggestion that the current implementation reliably warns or abstains on ambiguous charts would therefore overstate the code. In the proposed evaluation, warning coverage is a separate outcome. Until the behavior is changed and tested, manual correction remains the safer route for a chart that lacks a readable unit or dimension header.
+
+\subsection{A worked trace through the local rules}
+
+To see the interaction among stages, take a synthetic six-token chart. The header row contains \texttt{SIZE}, \texttt{CHEST}, and \texttt{WAIST}, centered at horizontal coordinates 10, 100, and 200. The next row contains \texttt{M}, \texttt{96-100}, and \texttt{74-78} at the same horizontal centers. Place the row centers at vertical coordinates 10 and 50. The example is constructed for explanation; it is not a tested retail image or benchmark item. It makes the rules' consequences visible without inventing a measured success rate.
+
+The normalizer changes the header strings before role classification. \texttt{SIZE} becomes \texttt{51ZE}, \texttt{CHEST} becomes \texttt{CHE5T}, and \texttt{WAIST} becomes \texttt{WA15T}. \texttt{M} and the numeric ranges remain readable. The geometry stage sees vertical centers at 10 and 50, with a qualifying gap of 40 pixels, so its half-mean threshold is 20. The horizontal gaps are 90 and 100 pixels, so the corresponding threshold is 47.5. On these deliberately aligned boxes, row and column indices are stable. The loss occurs in the labels rather than in the geometry.
+
+The size label \texttt{M} is eligible because it is in the first column. The range tokens can be classified as measurements and associated with the same row. Header classification, however, no longer recognizes the transformed words as dimension headings. The later mapper consequently has to fall back to position: column one is chest and column two waist. It returns the intended fields for this particular order. If the same chart prints \texttt{WAIST} before \texttt{CHEST}, the fallback produces the opposite association while the numeric values and size label remain unchanged. A result that looks complete can therefore be wrong for a reason that a simple OCR text-accuracy metric would miss.
+
+The example also exposes what the score means. With two rows, three columns, one size label, and two measurements, the source rules choose a structural factor of 0.75. One size label among six cells gives a semantic factor of 0.7. OCR and regional factors are 0.8 by default. Their product is 0.336; none of the four factors falls below the extra-penalty threshold. This is an arithmetic consequence of the current constants, not a probability that the row is correct. The final warning method still returns no warning. The example would be especially misleading if a user interpreted 0.336 as a calibrated confidence or assumed the empty warning list meant the table was verified.
+
+A second synthetic fixture has a size label \texttt{XL}. The normalizer changes it to \texttt{X1}, which the alphabetic size pattern does not accept. A single-letter \texttt{L} changes to the digit \texttt{1} and can be discarded by the isolated-single-digit rule. These cases show that the same normalizer can both repair numeric OCR and erase size labels. They justify measuring false repairs separately from successful repairs. The fixture descriptions can be turned into unit tests of the token stage, while image-level tests still need actual screenshots and annotations.
+
+\subsection{Source traceability and what remains unobserved}
+
+The worked trace maps to specific functions. \texttt{extractRawOcrTokens} supplies text and rectangles while assigning the constant element score. \texttt{normalizeTokens} performs substitutions and filtering. The row and column threshold functions calculate spacing; \texttt{extractMeasurements} parses numeric cells. \texttt{injectContext} maps values to named dimensions and can fall back to column position. \texttt{collapseConfidence} multiplies heuristic factors; \texttt{generateWarnings} currently adds no warning. A reader can repeat this inspection against the source revision used for the paper.
+
+Static inspection has limits. The trace says what the code would do to the described token strings and boxes, assuming those tokens enter the method. It does not establish that ML Kit will emit the same tokens from a raster image. It does not measure processing time on a phone, memory use, or whether a picker grants a particular URI. It cannot show how often real charts use the conventional column order that makes the fallback look right. Those are empirical questions. The proposed corpus and device protocol below are designed to answer them without turning source-level deductions into performance claims.
+
+The local-route distinction must also be checked at the call site. The main processing method can invoke a service when service and account parameters are present. A claim about local operation is therefore conditional on a particular invocation, not guaranteed by the class name. The study should record the input method, parameter values relevant to routing, application build, and observed network activity. This is a narrow but defensible way to discuss privacy: it gives future measurements a precise target and avoids attributing an entire app's behavior to one code path.
+
+\section{Fit reasoning is a separate question}
+
+An extracted garment table is not the same as a validated recommendation. Fit depends on body measurements, garment cut, stretch, preferred ease, and the brand's measurement convention. The reviewed codebase includes fit-related engines and heuristic constants, but this manuscript has no measured study showing that their recommendations predict a customer's comfort or purchase outcome. Reporting table extraction and fit quality as one number would obscure both tasks.
+
+A responsible fit study would need consented or otherwise legitimately obtained measurements, garment ground truth, explicit fit preferences, and an outcome measure. It would also need to identify systematic errors across body shapes and product categories. None of these data should be inferred from marketing claims or a single demonstration image. A future study can use the reconstructed chart as one input to that broader experiment, but the present implementation report stops at extraction and the handling of uncertainty.
+
+The user interface should also preserve the distinction. It can display recognized values and ask for manual correction before any recommendation is made. When a unit or measurement convention is unknown, the interface should request clarification rather than filling a gap with a plausible number. This human correction path can be measured: count how often a user fixes OCR text, cell association, and semantic labeling, and whether the corrected table is retained locally. No user study is claimed here.
+
+\section{Corpus construction}
+
+The proposed corpus should include permission-cleared images from several presentation styles: clean digital charts, compressed screenshots, and camera photographs. Every image needs an annotation record with visible text, cell rectangles, row and column identifiers, size labels, dimension names, units, and illegible regions. Annotators should be able to mark uncertain or unreadable content. A forced transcription of an unreadable cell would create false ground truth.
+
+Two independent annotators should label a subset before adjudication. Agreement should be reported on specific units of work: exact text, cell assignment, and semantic role. A single agreement number hides where ambiguity lies. Disagreements should be resolved with a written rule, and ambiguous cases should remain tagged. The corpus should be split by brand or template family to reduce near-duplicate leakage. A test set filled with variations of one template cannot establish generality across retail chart styles.
+
+Each image should retain metadata about resolution, rotation, language, chart type, and whether it measures body or garment dimensions. Only images that the author is allowed to redistribute should be included in a public release. Private customer screenshots should be replaced with synthetic examples or kept under controlled evaluation, with a public generator and aggregate metrics when possible. This manuscript does not claim that the corpus already exists.
+
+\subsection{A fixture set that separates error sources}
+
+The first fixture set can be made without collecting retailer images. It should feed explicit token strings and rectangles directly into the reconstruction boundary. Start with the six-token example above, then vary one property at a time. Reverse the two dimension headings without moving the numbers; change \texttt{M} to \texttt{XL}; remove the unit; move one value just beyond the row threshold; and put two OCR elements at the same vertical center. Each case has a short expected record: the input tokens, the intended row and column assignment, the semantic role of each token, and whether the parser ought to abstain. This isolates deterministic rule behavior from variability introduced by the recognizer.
+
+The fixture oracle must distinguish the literal printed text from a normalized value. A chart that prints \texttt{96-100} has a literal range, while a chart that prints \texttt{98} has only a point value. If the parser expands the latter into \texttt{[96,100]}, the test should record an inferred interval and must not score it as a faithful transcription. The same distinction applies to units: an unlabeled \texttt{98} is not a printed \texttt{98 cm}. A test that accepts the inferred unit as ground truth would reward fabrication by construction.
+
+One paired fixture should preserve the boxes and vary only the token text between \texttt{CHEST} and \texttt{CHE5T}. Another should preserve the text and shift one box so that the row assignment changes. Their outputs reveal whether a wrong association came from lexical normalization or geometry. A third can put \texttt{WAIST} in the first measurement column and \texttt{CHEST} in the second; if the transformed headers are not recognized, the positional fallback will assign the labels in the opposite order. These are regression tests of known source-level risks, not estimates of their frequency in use.
+
+Image-level fixtures answer a different question. They should include a clean digital table, a compressed screenshot, an oblique photograph, and a crop that removes part of a unit label. For every image, archive the raster, ML Kit element text and boxes, the reconstructed cells, and the final size entries as separate artifacts. When a result is wrong, the trace then shows whether the image recognition, box geometry, or reconstruction rules introduced the error. Token-level tests alone cannot show that a particular OCR output is likely from a real photograph.
+
+The corpus should deliberately contain row-oriented and column-oriented tables. A transposed chart with sizes across the top should not be silently compared with a row-oriented output. Include a multi-line heading, merged heading cells, a second unrelated chart in the same image, and a footnote containing a number. These cases test the assumption that every numeric token near a size row is a measurement. If the implementation cannot represent a merged or second table, mark the case unsupported and include it in the coverage denominator rather than deleting it from the test set.
+
+Measurement convention needs its own fixtures. Use visibly labeled examples for body circumference, garment circumference, flat width, and inches, plus an unlabeled example. A flat width of 48 cm must not be compared directly with a body circumference of 96 cm simply because the two might be related by doubling. The expected record should include the literal value, unit, convention, and any normalization applied. Unknown convention is a valid annotation. It is preferable to a confident value that depends on an assumption absent from the chart.
+
+Finally, use the same fixture identifiers in the annotation file, parser trace, failure ledger, and results table. A failure ledger should state which stage first diverged from the oracle and which later stages merely propagated that divergence. Brand or template families must be assigned before splitting development and held-out data; adjacent screenshots of the same chart belong in one split. This procedure would let an eventual evaluation say not only how many cells were wrong, but why. The fixtures described here remain a test design until their files, annotations, and execution results are supplied.
+
+
+\begin{table}[H]
+\centering\small
+\caption{Proposed reconstruction fixtures. Predictions follow from inspected rules; no image-level result is claimed.}
+\label{tab:ocr-fixtures}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.21\linewidth}>{\raggedright\arraybackslash}p{0.34\linewidth}>{\raggedright\arraybackslash}p{0.35\linewidth}@{}}
+\toprule
+Input variation & Source-predicted behavior & Evidence needed in a run \\
+\midrule
+\texttt{SIZE}, \texttt{CHEST}, \texttt{WAIST} & Letter substitutions damage the header strings. & Retain raw and normalized tokens. \\
+Swap chest and waist columns & Positional fallback can reverse associations. & Compare output fields with annotated cells. \\
+Replace \texttt{M} with \texttt{XL} & The label becomes \texttt{X1}; classification can fail. & Count label omissions and false repairs. \\
+Remove a printed unit & Plain numeric parsing assumes centimeters. & Separate literal and inferred unit fields. \\
+Move one token box & Gap threshold may change row assignment. & Save boxes and intermediate row IDs. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Metrics and baselines}
+
+Character recognition, structure, and semantics need separate outcomes. Exact token text accuracy can describe the OCR input. Row and column assignment can describe geometry. Cell association accuracy can ask whether a measurement value is attached to the correct size and dimension. Unit accuracy and range-parsing accuracy should be reported separately. Chart-level exact reconstruction is stricter and may be low even if most cells are correct. Every rate requires a numerator, denominator, and treatment of ambiguous annotations.
+
+
+Let $G$ be the set of legible ground-truth measurement cells. A predicted
+cell is correct only if its size label, dimension, value, and unit all match.
+We would report both association accuracy and the coverage of non-abstained
+cells:
+\begin{equation}
+A_{\mathrm{assoc}}=\frac{1}{|G|}\sum_{g\in G}
+\mathbf{1}\{\hat{s}_g=s_g,\hat{d}_g=d_g,\hat{v}_g=v_g,\hat{u}_g=u_g\},
+\qquad
+C=\frac{|\{g\in G:\hat{v}_g\text{ emitted}\}|}{|G|}.
+\end{equation}
+The denominator includes missed cells; an abstained cell is not silently
+removed from the accuracy calculation. These expressions define proposed
+metrics and contain no measured values.
+
+
+The abstention tradeoff should be shown as error against coverage. A useful plot would vary a preselected quality threshold and show the fraction of charts answered and the fraction of answered cells that are wrong. The threshold used for the final evaluation must not be tuned on the held-out set. Bootstrap intervals by chart, not by cell alone, would account for dependence among cells in one image. A table with many rows must not dominate a corpus of small charts without an explicit weighting decision.
+
+Baselines should test the value of geometry and normalization. A plain text parser, the same parser without coordinate grouping, and the coordinate pipeline without normalization would isolate contributions. If a cloud vision model is compared, disclose the network path, prompt, model version, cost assumptions, and data permissions. No such comparison has been performed for this paper. A comparison table with invented numbers would be worse than a clear protocol with no results.
+
+\subsection{Mobile performance and offline verification}
+
+Latency should be measured from image selection or scan invocation through a usable structured result. Report OCR time, reconstruction time, and total wall time separately. Both cold and warm runs matter because model initialization can dominate the first invocation. Test on named physical devices with Android version, chipset, available memory, and image dimensions recorded. Do not report emulator timing as representative of a budget phone.
+
+Memory use should include more than Java heap if image buffers or native OCR resources are significant. Report peak process memory and temporary storage where measurable. Keep failures, timeouts, and out-of-memory events in the denominator. If the pipeline downsamples an image, record the rule and show how this changes recognition accuracy. A faster result obtained by discarding small text is not an unqualified improvement.
+
+The offline test should begin with the bundled model present, disable network access, and monitor the application process during the specific scanner route. Record whether any connection attempt occurs, not only whether a server receives an image. The application's other features should be excluded from the observed session or clearly identified. A zero-traffic observation for one route is useful evidence but not a proof that every app path is offline. No network capture is presented in this draft.
+
+\subsection{Annotation audit and measurement conventions}
+
+The ground-truth table should describe what is visible, not what an annotator believes the retailer intended. For each cell, the annotation can preserve literal text and a normalized interpretation as separate fields. For example, a printed range ``90--96'' should retain that string even if the normalized record stores lower and upper bounds. If a photograph cuts off the unit label, the literal annotation should mark it missing. A later analyst may infer a likely unit, but that inference cannot be silently inserted into the visible-text ground truth.
+
+Garment conventions deserve a dedicated field. A chart may describe the body size suitable for the item, the garment's actual circumference, a flat half-width, or a measurement of the finished product after stretching. These are not interchangeable. The annotation guide should provide examples and an ``unknown'' category. When two annotators disagree about the convention, the case should be adjudicated separately from OCR text. Otherwise a parser could be penalized for refusing to make an unsupported inference, while a guesser appears correct by chance.
+
+The audit should also record relationships among cells. A size label may apply to a row, a column, or several subcolumns. A dimension heading may span multiple sizes. An image can contain two charts for different product variants. A flat list of cells cannot represent these structures; the annotation schema should include table IDs, row IDs, column IDs, and optional spanning relationships. The schema need not be complex at first, but it must represent the cases present in the test set. If it cannot, those cases should be marked out of scope before scoring.
+
+A small adjudication log can make the evaluation more reproducible. For each disputed case, record the competing readings, the evidence in the image, and the final rule. A blinded second review of a sample of resolved cases can reveal whether the rules are consistently applied. This matters because ``ground truth'' in noisy retail images is often a judgment made under uncertainty. Publishing only the final table without the annotation decisions would make seemingly precise accuracy numbers difficult to trust. No such audit has been completed for this draft.
+
+\section{Failure analysis and safety}
+
+Failure cases should be preserved as first-class results. Examples include truncated rows, overlapping columns, mixed units, OCR substitutions in size labels, decorative text treated as measurements, and numeric values assigned to the wrong dimension. For each case, keep the image, raw tokens, reconstructed cells, final records, and warning state. This chain makes it possible to determine whether the error began in recognition, grouping, labeling, or validation.
+
+Safety in this context is mainly about avoiding false certainty. A mistaken size chart can lead to a poor purchase, wasted money, and loss of trust. The tool should surface ambiguity and allow manual correction, especially when the unit or measurement convention is absent. It should avoid using an anthropometric estimate as if it were measured truth. The quality score presently used by the implementation is heuristic; until calibrated against held-out outcomes, it should not be displayed as a probability of correctness.
+
+Privacy includes more than upload decisions. Test images and body measurements may remain in caches, logs, or backups. A public repository should not contain customer images, personal measurements, API credentials, or private endpoints. If source snippets are extracted into an MIT-licensed package, verify that only author-owned logic is copied and that third-party components retain their original licenses. The present paper is not a security audit, and it does not claim one.
+
+\section{Reproducibility and release plan}
+
+A reproducible release needs a precise source revision, a build command, a test command, and a mapping from the paper's algorithm descriptions to code paths. The separate Kotlin package should state that it accepts OCR tokens rather than images. The Android scanner should state its ML Kit dependency and the route used for local processing. If a future release integrates these into one library, that is a new artifact requiring its own version and tests.
+
+Machine-readable result files should accompany any later empirical revision. They should identify chart IDs, predicted and annotated cells, device IDs, and run outcomes without exposing private images. A script can compute the metrics from those files. The script and annotation schema should be released with a precise code revision before a paper claims a benchmark score. The release should contain only the inspected algorithm, redistributable test inputs, and their provenance.
+
+The source revision used for the inspection should be stated in a future public version. The present paper is an implementation report: it does not contain the annotated corpus or benchmark results described above. Its value lies in exposing the exact assumptions that those experiments must test.
+
+\section{Conclusion}
+
+The inspected code supports a concrete, limited claim: an Android local OCR route retains spatial text information and applies rule-based reconstruction, while a separate package allows the reconstruction stage to be examined without image recognition. That is enough to motivate a careful evaluation. It is not enough to assert extraction accuracy, mobile speed, fit validity, or absolute privacy. The next scientific step is a permission-cleared corpus, documented annotation, meaningful baselines, physical-device measurements, and explicit failure analysis.
+
+The paper precedes those experiments. When results exist, the manuscript should be revised around observed outcomes, including negative ones. In particular, a measured failure to identify a header, a unit, or a size label would be more informative than an aggregate score that conceals the association error.
+
+\begin{thebibliography}{99}
+
+\bibitem{r1} Google Developers. \emph{Recognize text in images with ML Kit on Android}. \url{https://developers.google.com/ml-kit/vision/text-recognition/v2/android}
+
+\bibitem{r2} X. Zhong, J. Tang, and A. J. Yepes. \emph{PubLayNet: Largest dataset ever for document layout analysis}. ICDAR, 2019. \url{https://arxiv.org/abs/1908.07836}
+
+\bibitem{r3} B. Smock, R. Pesala, and R. Abraham. \emph{PubTables-1M: Towards comprehensive table extraction from unstructured documents}. 2021. \url{https://arxiv.org/abs/2110.00061}
+
+\bibitem{r4} Android Developers. \emph{Android Photo Picker}. \url{https://developer.android.com/training/data-storage/shared/photopicker}
+
+\end{thebibliography}
+
+\noindent\footnotesize Copyright 2026 Ikbal Fadilah. This manuscript is licensed under the \href{https://creativecommons.org/licenses/by/4.0/}{Creative Commons Attribution 4.0 International License (CC BY 4.0)}.
+
+\end{document}

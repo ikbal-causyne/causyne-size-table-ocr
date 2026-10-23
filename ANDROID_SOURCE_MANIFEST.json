@@ -1,0 +1,31 @@
+{
+  "origin": "Vanexa Android application",
+  "git_head_at_extraction": "75a111a91fca56d0a24885fe276c2bb0cd3af347",
+  "note": "Selected, unmodified source files from the working tree. They are not a standalone Android project.",
+  "files": [
+    {
+      "source_path": "app/src/main/java/com/vanexa/supercalculator/domain/usecase/OcrSizeIntelligenceEngine.kt",
+      "sha256": "a878c7cceffea7ef2bb8f7989d2ad9101c62f3c51e5a91070c10f1639127183b"
+    },
+    {
+      "source_path": "app/src/main/java/com/vanexa/supercalculator/domain/model/OcrEngineModels.kt",
+      "sha256": "bdad20f3fbee9e35889a7c697ddf9e86deed6bed45ac820976154473f3751a3b"
+    },
+    {
+      "source_path": "app/src/main/java/com/vanexa/supercalculator/domain/model/SizeChart.kt",
+      "sha256": "87097aa18d3fc41c4e991eb060b25c3dc1a9ace5218a77ed8f19066dd5acf0d1"
+    },
+    {
+      "source_path": "app/src/main/java/com/vanexa/supercalculator/domain/model/Health.kt",
+      "sha256": "a642a97b26ef4dae20af38dedec7ae9f1fc9221ecb607fa9aaeb15bf1ee41838"
+    },
+    {
+      "source_path": "app/src/main/java/com/vanexa/supercalculator/presentation/size/SizeViewModel.kt",
+      "sha256": "c3de67f571baac81d099cc13f572972cc1900e1938c7bc9cecd5a7fec9c723a8"
+    },
+    {
+      "source_path": "app/src/main/java/com/vanexa/supercalculator/presentation/size/SizeScreen.kt",
+      "sha256": "9a9f1ebb6def8c4810c91ad674d797230f2602410ffecee25df02d22ff5da84b"
+    }
+  ]
+}

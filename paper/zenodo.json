@@ -1,0 +1,17 @@
+{
+  "title": "From OCR Tokens to Apparel Size Tables: An Android Implementation and Failure Analysis",
+  "description": "Source-level study of a spatial OCR size-table pipeline, including deterministic failure cases and a proposed evaluation protocol. No empirical accuracy or performance results are claimed.",
+  "creators": [
+    {
+      "name": "Fadilah, Ikbal",
+      "affiliation": "Causyne",
+      "orcid": "0009-0008-4853-135X"
+    }
+  ],
+  "resource_type": {
+    "type": "publication",
+    "subtype": "preprint"
+  },
+  "access_right": "open",
+  "license": "cc-by-4.0"
+}

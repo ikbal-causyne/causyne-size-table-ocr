@@ -1,5 +1,7 @@
 # From OCR Tokens to Apparel Size Tables: An Android Implementation and Failure Analysis
 
+[![Paper DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23600826.svg)](https://doi.org/10.5281/zenodo.23600826)
+
 **Read the paper:** [10-page PDF](paper/paper1_review.pdf) · [LaTeX source](paper/main.tex)
 
 This public preprint is published on Zenodo ([DOI: 10.5281/zenodo.23600826](https://doi.org/10.5281/zenodo.23600826)), and has not been peer reviewed. Cite the paper for its analysis and this repository for code reuse. No journal publication is claimed.
